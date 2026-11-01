@@ -1,0 +1,136 @@
+# macOS 独立验证：在干净 runner 上检查原生构建与测试路径，不改动 Linux/Windows 任务。
+# 设置工作流、任务或步骤的显示名称。
+name: macOS
+# 源码或脚本变化时自动验证，也支持 Actions 页面手动触发。
+# 配置工作流触发事件。
+on:
+  # 响应向主分支推送代码。
+  push:
+    # 仅匹配 main 分支。
+    branches: [main]
+    # 仅文档和许可证变化时跳过运行。
+    paths-ignore: ['README.md', 'docs/**', 'LICENSE', 'NOTICE']
+  # 响应针对主分支的合并请求。
+  pull_request:
+    # 仅匹配 main 分支。
+    branches: [main]
+    # 仅文档和许可证变化时跳过运行。
+    paths-ignore: ['README.md', 'docs/**', 'LICENSE', 'NOTICE']
+  # 允许在 Actions 页面手动触发。
+  workflow_dispatch:
+# 任务仅读取仓库，不授予发布或推送权限。
+# 限定 GitHub 令牌权限。
+permissions:
+  # 只允许读取仓库内容。
+  contents: read
+# 同一分支或 PR 的新运行取消旧运行，避免浪费 macOS runner。
+# 配置并发运行控制。
+concurrency:
+  # 按工作流和分支或 PR 生成并发组。
+  group: macos-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # 新运行自动取消同组旧运行。
+  cancel-in-progress: true
+# 定义独立的 CI 任务。
+jobs:
+  # 定义 macOS 平台任务。
+  macos:
+    # 设置工作流、任务或步骤的显示名称。
+    name: macOS ARM64 (native)
+    # 固定 ARM64 系统标签，避免 latest 切换操作系统版本。
+    # 选择固定版本的 macOS ARM64 runner。
+    runs-on: macos-26
+    # 将单任务最长执行时间限制为九十分钟。
+    timeout-minutes: 90
+    # 设置任务级环境变量。
+    env:
+      # runner 内存较小，降低 slang 并行编译的峰值内存。
+      # 将编译并行度限制为二。
+      RTL_BUILD_JOBS: '2'
+    # 按顺序执行 checkout、检查、构建和测试。
+    steps:
+      # 设置工作流、任务或步骤的显示名称。
+      - name: Check out source
+        # 调用指定版本的 GitHub 官方 action。
+        uses: actions/checkout@v4
+        # 配置当前 action 的输入参数。
+        with:
+          # 构建无需 GitHub 凭据，不将凭据写入 checkout 的本地配置。
+          # 不把 checkout 凭据持久化到 Git 配置。
+          persist-credentials: false
+      # 设置工作流、任务或步骤的显示名称。
+      - name: Inspect Apple toolchain
+        # 使用 Bash 并遵循 Actions 的失败退出规则。
+        shell: bash
+        # 执行下方命令；任一命令失败即终止本步骤。
+        run: |
+          # 输出操作系统和 CPU 架构。
+          uname -ms
+          # 确认 runner 为 ARM64，避免误用 Intel。
+          test "$(uname -m)" = arm64
+          # 输出当前开发工具链目录。
+          xcode-select -p
+          # 输出 Apple Clang 版本。
+          xcrun clang++ --version
+          # 确认当前工具链可定位 Python。
+          xcrun --find python3
+      # 设置工作流、任务或步骤的显示名称。
+      - name: Prepare native dependencies
+        # 使用 Bash 并遵循 Actions 的失败退出规则。
+        shell: bash
+        # 执行下方命令；任一命令失败即终止本步骤。
+        run: |
+          # 原生安装项目私有 CMake 和 Ninja。
+          ./tools/macos.sh tools
+          # 原生准备固定版本依赖。
+          ./tools/macos.sh bootstrap
+          # 原生下载私有测试浏览器。
+          ./tools/macos.sh browser
+      # 设置工作流、任务或步骤的显示名称。
+      - name: Build and test native path
+        # 使用 Bash 并遵循 Actions 的失败退出规则。
+        shell: bash
+        # 执行下方命令；任一命令失败即终止本步骤。
+        run: |
+          # 原生构建 worker、服务端和 WebUI。
+          ./tools/macos.sh build
+          # 原生执行包含 UI 的完整测试。
+          ./tools/macos.sh test
+      # 设置工作流、任务或步骤的显示名称。
+      - name: Print dependency logs on failure
+        # 仅在匹配模式或对应执行状态时运行此步骤。
+        if: failure()
+        # 使用 Bash 并遵循 Actions 的失败退出规则。
+        shell: bash
+        # 执行下方命令；任一命令失败即终止本步骤。
+        run: |
+          # 没有匹配日志时将 glob 展开为空列表。
+          shopt -s nullglob
+          # 遍历依赖配置、构建及 npm 日志。
+          for log in .sandbox/evidence/slang-*.log .sandbox/evidence/npm-ci.log; do
+            # 在 Actions 日志中开始可折叠日志分组。
+            echo "::group::$log"
+            # 打印当前日志最后一百五十行。
+            tail -n 150 "$log"
+            # 结束当前日志分组。
+            echo "::endgroup::"
+          # 结束日志遍历。
+          done
+      # 设置工作流、任务或步骤的显示名称。
+      - name: Upload diagnostics
+        # 仅在匹配模式或对应执行状态时运行此步骤。
+        if: always()
+        # 调用指定版本的 GitHub 官方 action。
+        uses: actions/upload-artifact@v4
+        # 配置当前 action 的输入参数。
+        with:
+          # 设置原生任务的诊断产物名称。
+          name: macos-native-evidence
+          # 仅保存诊断，不上传 Node、依赖、浏览器和庞大的编译产物。
+          # 只上传项目内的诊断证据目录。
+          path: .sandbox/evidence/
+          # 允许上传 .sandbox 隐藏目录中的证据。
+          include-hidden-files: true
+          # 没有证据文件时给出警告。
+          if-no-files-found: warn
+          # 将诊断产物保留七天。
+          retention-days: 7

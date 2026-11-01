@@ -1,0 +1,138 @@
+#!/bin/bash
+# macOS 沙箱启动器：生成按路径授权的 Seatbelt 策略，隔离环境后执行指定命令。
+# Copyright 2026 Frank Gao
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# 启用严格错误处理。
+set -euo pipefail
+# 拒绝非 macOS ARM64 平台。
+[[ "$(uname -s)-$(uname -m)" == Darwin-arm64 ]] || { echo "macOS ARM64 required" >&2; exit 1; }
+# 根据启动器位置定位默认仓库根目录。
+ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
+# 读取当前选中的 Xcode 或 Command Line Tools 目录。
+DEVELOPER="$(xcode-select -p)"
+# 定位当前 Apple Clang 所在目录。
+COMPILER_BIN="$(dirname "$(xcrun --find clang)")"
+# 初始化项目、构建 profile、离线模式和额外输入目录数组。
+PROJECT="$ROOT"; PROFILE=build; NETWORK=offline; INPUTS=()
+# 循环解析启动器选项。
+while (($#)); do
+ # 按当前参数匹配选项类型。
+ case "$1" in
+ # 读取 profile 参数并移除该选项及其值。
+ --profile) [[ $# -ge 2 ]] || exit 2; PROFILE="$2"; shift 2;;
+ # 读取网络模式并移除该选项及其值。
+ --network) [[ $# -ge 2 ]] || exit 2; NETWORK="$2"; shift 2;;
+ # 读取项目目录并移除该选项及其值。
+ --project) [[ $# -ge 2 ]] || exit 2; PROJECT="$2"; shift 2;;
+ # 追加显式授权的输入目录并移除该选项及其值。
+ --input) [[ $# -ge 2 ]] || exit 2; INPUTS+=("$2"); shift 2;;
+ # 遇到分隔符后停止解析，余下参数作为命令。
+ --) shift; break;;
+ # 打印启动器用法并正常退出。
+ -h|--help) echo "usage: rtl-macos [--profile bootstrap|build|test|run|edit] [--network online|offline] [--project DIR] [--input DIR]... -- COMMAND [ARGS...]"; exit 0;;
+ # 遇到命令本身时停止选项解析。
+ *) break;;
+ # 结束当前选项分派。
+ esac
+# 结束选项解析循环。
+done
+# 验证 profile 属于允许的五种类型，否则退出。
+case "$PROFILE" in bootstrap|build|test|run|edit) ;; *) exit 2;; esac
+# 验证网络模式为 online 或 offline，否则退出。
+case "$NETWORK" in online|offline) ;; *) exit 2;; esac
+# 将项目目录解析为不含符号链接的绝对路径。
+PROJECT="$(cd "$PROJECT" && pwd -P)"
+# 创建项目私有 HOME、缓存、配置、临时及证据等目录。
+for d in home cache config data tmp deps run evidence; do mkdir -p "$PROJECT/.sandbox/$d"; done
+# 创建允许存放构建产物和运行状态的目录。
+for d in build dist state node_modules; do mkdir -p "$PROJECT/$d"; done
+# 在项目内为本次执行创建独立策略文件。
+POLICY="$(mktemp "$PROJECT/.sandbox/run/profile.XXXXXX")"
+# 启动器退出时删除本次策略文件。
+trap 'rm -f "$POLICY"' EXIT
+# 向 Python 传入项目、权限、工具链、系统临时目录和输入参数，生成策略。
+python3 - "$PROJECT" "$PROFILE" "$NETWORK" "$DEVELOPER" "$(getconf DARWIN_USER_TEMP_DIR)" ${INPUTS[@]+"${INPUTS[@]}"} > "$POLICY" <<'PY'
+# 导入参数、JSON 转义、路径规范化和正则表达式接口。
+import sys,json,os,re
+# 解包策略生成所需参数及可重复的输入目录。
+root,profile,network,developer,system_tmp,*inputs=sys.argv[1:]
+# 转义策略字符串并保留中文路径字符。
+q=lambda s: json.dumps(s, ensure_ascii=False)
+# 默认拒绝，允许子进程、同沙箱信号、系统查询、根目录读取及元数据访问。
+print('(version 1)(deny default)(allow process*)(allow signal (target same-sandbox))(allow sysctl-read)(allow file-read-data (literal "/"))(allow file-read-metadata)(allow mach-lookup)')
+# 仅为测试 profile 添加浏览器所需例外。
+if profile=='test':
+ # 构造仅匹配 Chromium 随机下载临时目录的路径表达式。
+ temp_pattern='^'+re.escape(os.path.realpath(system_tmp))+'/[.]org[.]chromium[.]Chromium[.][A-Za-z0-9]+(/.*)?$'
+ # 允许访问上述精确匹配的临时文件目录。
+ print('(allow file-read* file-write* (regex '+q(temp_pattern)+'))')
+ # 允许测试浏览器查询文件系统剩余空间。
+ print('(allow system-info (info-type "vfs.disk-space"))')
+ # 允许 Chromium 注册其按进程编号命名的 Mach 服务。
+ print('(allow mach-register (global-name-regex #"^org[.]chromium[.]Chromium[.]MachPortRendezvousServer[.][0-9]+$"))')
+# 枚举系统运行库、开发工具链和项目的只读路径。
+for p in ['/System','/usr','/bin','/sbin','/Library/Developer','/Library/Apple','/private/etc','/Library/Preferences','/dev',developer,root]:
+ # 允许读取及映射这些目录下的可执行文件和动态库。
+ print('(allow file-read* file-map-executable (subpath '+q(p)+'))')
+# Apple's Bash 3.2 creates heredoc files in its working directory.
+# 仅放行 Apple Bash 在仓库根目录创建的数字命名 heredoc 临时文件。
+print('(allow file-read* file-write* (regex '+q('^'+re.escape(root)+'/sh-thd-[0-9]+$')+'))')
+# 枚举项目内允许写入的依赖、缓存、产物和状态目录。
+for p in ['.sandbox','build','dist','state','node_modules']:
+ # 为当前产物目录生成可写规则。
+ print('(allow file-write* (subpath '+q(root+'/'+p)+'))')
+# 只有显式 edit profile 才允许写入整个项目。
+if profile=='edit': print('(allow file-write* (subpath '+q(root)+'))')
+# 逐一处理用户显式授权的工程输入目录。
+for p in inputs:
+ # 解析输入目录的真实绝对路径。
+ p=os.path.realpath(p)
+ # 输入目录不存在时拒绝生成策略。
+ if not os.path.isdir(p): raise SystemExit('input directory missing')
+ # 允许读取输入源码和映射相关文件。
+ print('(allow file-read* file-map-executable (subpath '+q(p)+'))')
+ # 仅允许向输入工程的 .rtlb 状态子目录写入。
+ print('(allow file-write* (subpath '+q(p+'/.rtlb')+'))')
+ # access(W_OK) on the directory requires this; child creation stays denied.
+ # 允许输入目录本身通过 W_OK 检查，子文件新增仍受限制。
+ print('(allow file-write-data (literal '+q(p)+'))')
+# 允许命令向空设备丢弃输出。
+print('(allow file-write* (literal "/dev/null"))')
+# 联网模式允许网络访问以下载依赖。
+if network=='online': print('(allow network*)')
+# 离线模式仅允许本机回环地址的绑定、监听和连接。
+else: print('(allow network-inbound (local ip "localhost:*"))(allow network-outbound (remote ip "localhost:*"))(allow network-bind (local ip "localhost:*"))')
+# 结束内嵌 Python 策略生成程序。
+PY
+# 读取仓库固定的 Node 版本号。
+NODE_VER="$(sed -n 's/.*"nodeVersion": "\([^"]*\)".*/\1/p' "$PROJECT/tools/deps/versions.json")"
+# 切换到项目根目录执行命令。
+cd "$PROJECT"
+# 未指定命令时启动不读取宿主配置的 Bash。
+(($#)) || set -- /bin/bash --noprofile --norc
+# 初始化允许继承的额外环境数组。
+EXTRA_ENV=()
+# 只有联网模式才继承代理配置。
+if [[ "$NETWORK" == online ]]; then
+ # 遍历大小写代理和代理排除列表变量。
+ for key in http_proxy https_proxy all_proxy no_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY; do
+  # 只复制已设置的代理值，不打印它们。
+  if [[ -n "${!key:-}" ]]; then EXTRA_ENV+=("$key=${!key}"); fi
+ # 结束代理变量遍历。
+ done
+# 结束联网环境分支。
+fi
+# 清空继承环境，设置私有目录和工具链后，通过 sandbox-exec 执行命令并返回状态。
+/usr/bin/env -i HOME="$PROJECT/.sandbox/home" TMPDIR="$PROJECT/.sandbox/tmp" PATH="$PROJECT/.sandbox/deps/tools/bin:$PROJECT/.sandbox/deps/node-v$NODE_VER-darwin-arm64/bin:$COMPILER_BIN:$DEVELOPER/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin" DEVELOPER_DIR="$DEVELOPER" CC="$COMPILER_BIN/clang" CXX="$COMPILER_BIN/clang++" LANG=en_US.UTF-8 NPM_CONFIG_CACHE="$PROJECT/.sandbox/cache/npm" NPM_CONFIG_USERCONFIG="$PROJECT/.sandbox/config/npmrc" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$PROJECT/.sandbox/config/gitconfig" PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 RTL_BUILD_JOBS="${RTL_BUILD_JOBS:-4}" RTL_TEST_SKIP_UI="${RTL_TEST_SKIP_UI:-0}" RTL_PROJECT_ROOT="$PROJECT" RTL_SANDBOX=1 ${EXTRA_ENV[@]+"${EXTRA_ENV[@]}"} /usr/bin/sandbox-exec -f "$POLICY" "$@"

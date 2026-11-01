@@ -1,0 +1,8 @@
+{
+  "cmakeVersion": "3.31.8",
+  "cmakeUrl": "https://github.com/Kitware/CMake/releases/download/v3.31.8/cmake-3.31.8-macos-universal.tar.gz",
+  "cmakeSha256": "d1449f969c54d5c00886d5b643340d493dfb3c81cb39ee29b35453395c11ebf7",
+  "ninjaVersion": "1.11.1.3",
+  "ninjaUrl": "https://files.pythonhosted.org/packages/ea/ba/0069cd4a83d68f7b0308be70e219b15d675e50c8ea28763a3f0373c45bfc/ninja-1.11.1.3-py3-none-macosx_10_9_universal2.whl",
+  "ninjaSha256": "2b4879ea3f1169f3d855182c57dcc84d1b5048628c8b7be0d702b81882a37237"
+}
