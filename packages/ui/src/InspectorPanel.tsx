@@ -61,7 +61,7 @@ export function InspectorPanel({ instance, tab, onTab, ports, params, loading, e
   }, [index, matches]);
 
   return (
-    <section className="inspector-panel">
+    <section data-search-scope className="inspector-panel">
       <div className="pane-title">Inspector</div>
       <div className="pane-search-row">
         <SearchBox

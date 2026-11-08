@@ -68,6 +68,10 @@ cmake --fresh -S native/index-worker -B build/index-worker -G Ninja \
 echo "== build native worker =="
 cmake --build build/index-worker --parallel "$JOBS"
 
+echo "== build FST waveform worker =="
+cmake -S native/wave-worker -B build/wave-worker -DCMAKE_BUILD_TYPE=Release -DRTL_DEPS_DIR="$DEPS"
+cmake --build build/wave-worker --parallel "$JOBS"
+
 echo "== typecheck =="
 npm run typecheck
 

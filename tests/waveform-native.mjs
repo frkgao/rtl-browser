@@ -1,0 +1,53 @@
+// Copyright 2026 Frank Gao. SPDX-License-Identifier: Apache-2.0
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import path from 'node:path';
+
+const file = process.argv[2];
+assert.ok(file, 'Usage: node tests/waveform-native.mjs <OpenLLC llc-256k.fst>');
+const worker = process.env.RTL_WAVE_WORKER ?? path.resolve('build/wave-worker', process.platform === 'win32' ? 'wave-worker.exe' : 'wave-worker');
+function query(request) {
+  const p = spawnSync(worker, [], { input: JSON.stringify({ path: file, ...request }), encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+  assert.equal(p.status, 0, p.stderr || p.stdout);
+  const result = JSON.parse(p.stdout);
+  assert.equal(result.ok, true);
+  return result.data;
+}
+const info = query({ op: 'signals', query: 'TOP.TestTop.l3.clock', offset: 0 });
+assert.equal(info.total, 1);
+assert.ok(info.roots.some(r => r.name === "TOP"));
+assert.ok(info.signalCount > 500);
+assert.equal(info.timescale, -12);
+assert.equal(info.end, '540001');
+const clock = info.signals[0];
+assert.deepEqual(clock.scope, ['TOP', 'TestTop', 'l3']);
+assert.equal(clock.width, 1);
+const values = query({ op: 'values', handles: [clock.handle], start: '12345', end: '12400' });
+assert.equal(values.truncated, false);
+assert.equal(values.rows[0].changes.length, 56);
+assert.deepEqual(values.rows[0].changes[0], ['12345', '1']);
+assert.deepEqual(values.rows[0].changes.at(-1), ['12400', '0']);
+for (const [time, value] of values.rows[0].changes) assert.equal(value, String(BigInt(time) % 2n));
+const alias = query({ op: 'signals', query: 'TOP.TestTop.clock', offset: 0 }).signals.find(s => s.path === 'TOP.TestTop.clock');
+assert.equal(alias.handle, clock.handle);
+const bus = query({ op: 'signals', query: 'TOP.TestTop.l3.io_rn_0_tx_req_flit', offset: 0 }).signals.find(s => s.width === 162);
+assert.ok(bus);
+const multi = query({ op: 'values', handles: [clock.handle, bus.handle], start: '12345', end: '12400' });
+assert.equal(multi.rows.length, 2);
+const busChanges = multi.rows.find(r => r.handle === bus.handle).changes;
+assert.equal(busChanges[0][0], '12345');
+assert.equal(busChanges[0][1].length, 162);
+assert.match(busChanges[0][1], /^[01xz]+$/i);
+assert.equal(query({op:'edge',handle:clock.handle,cursor:'1001',direction:1,kind:'rise'}).time,'1003');
+assert.equal(query({op:'edge',handle:clock.handle,cursor:'1001',direction:1,kind:'fall'}).time,'1002');
+assert.equal(query({op:'edge',handle:clock.handle,cursor:'1001',direction:-1,kind:'rise'}).time,'999');
+assert.equal(query({op:'edge',handle:clock.handle,cursor:'0',direction:-1,kind:'any'}).time,null);
+assert.equal(query({op:'edge',handle:clock.handle,cursor:info.end,direction:1,kind:'any'}).time,null);
+const resolved=query({op:'resolve',paths:[clock.path,bus.path,'TOP.missing']});
+assert.equal(resolved.signals.length,2);
+assert.equal(resolved.signals.find(s=>s.path===bus.path).handle,bus.handle);
+const full = query({ op: 'values', handles: [clock.handle], start: '0', end: info.end });
+assert.equal(full.truncated, true, 'dense traces must explicitly report truncation');
+const invalid = spawnSync(worker, [], { input: JSON.stringify({ path: file, op: 'values', handles: [4294967295], start: '0', end: '1' }), encoding: 'utf8' });
+assert.equal(JSON.parse(invalid.stdout).ok, false);
+console.log('OpenLLC FST hierarchy, alias, time-window, value and limit checks: PASS');

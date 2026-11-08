@@ -1,0 +1,32 @@
+cmake_minimum_required(VERSION 3.28)
+project(rtl_wave_worker LANGUAGES C CXX)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+set(ZLIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/zlib")
+add_library(rtl_wave_zlib STATIC
+  "${ZLIB_DIR}/adler32.c" "${ZLIB_DIR}/compress.c" "${ZLIB_DIR}/crc32.c"
+  "${ZLIB_DIR}/deflate.c" "${ZLIB_DIR}/infback.c" "${ZLIB_DIR}/inffast.c"
+  "${ZLIB_DIR}/inflate.c" "${ZLIB_DIR}/inftrees.c" "${ZLIB_DIR}/trees.c"
+  "${ZLIB_DIR}/uncompr.c" "${ZLIB_DIR}/zutil.c"
+  "${ZLIB_DIR}/gzclose.c" "${ZLIB_DIR}/gzlib.c" "${ZLIB_DIR}/gzread.c" "${ZLIB_DIR}/gzwrite.c")
+if(NOT WIN32)
+  target_compile_definitions(rtl_wave_zlib PRIVATE Z_HAVE_UNISTD_H)
+endif()
+target_include_directories(rtl_wave_zlib PUBLIC "${ZLIB_DIR}")
+set(FST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/libfst")
+add_library(rtl_fst STATIC "${FST_DIR}/fstapi.c" "${FST_DIR}/fastlz.c" "${FST_DIR}/lz4.c")
+target_include_directories(rtl_fst PUBLIC "${FST_DIR}")
+target_link_libraries(rtl_fst PUBLIC rtl_wave_zlib)
+add_executable(wave-worker main.cpp)
+target_include_directories(wave-worker PRIVATE "${RTL_DEPS_DIR}")
+target_link_libraries(wave-worker PRIVATE rtl_fst)
+add_executable(wave-fixtures "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/waveform-fixtures.cpp")
+target_link_libraries(wave-fixtures PRIVATE rtl_fst)
+set_target_properties(wave-fixtures PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+set_target_properties(wave-worker PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+if(MSVC)
+  target_compile_options(wave-worker PRIVATE /utf-8 /EHsc)
+endif()

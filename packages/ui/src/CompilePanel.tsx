@@ -78,7 +78,7 @@ export function CompilePanel(props: Props) {
   }, [index, matches]);
 
   return (
-    <div className="compile-panel">
+    <div data-search-scope className="compile-panel">
       <div className="compile-head">
         <div className="job-list">
           {props.jobs.length === 0 && <span className="muted">暂无构建任务</span>}
@@ -144,7 +144,7 @@ export function CompilePanel(props: Props) {
         />
       </div>
       <div className="diagnostic-list">
-        {props.diagnostics.length === 0 && <div className="panel-empty">没有符合条件的诊断</div>}
+        {props.diagnostics.length === 0 && <div className="panel-empty">{props.loading ? "正在加载诊断…" : job && !["COMPLETE","FAILED","CANCELLED"].includes(job.state) ? "编译进行中，尚无符合条件的诊断；后续信息会自动更新。" : "没有符合条件的诊断"}</div>}
         {props.diagnostics.map((d) => (
           <div
             ref={(el) => { if (el) rowRefs.current.set(d.sequence, el); else rowRefs.current.delete(d.sequence); }}

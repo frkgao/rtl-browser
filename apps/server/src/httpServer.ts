@@ -25,6 +25,7 @@ import { BuildManager, type BuildEvent, type DiagnosticsFilter } from "../../../
 import { normalizeDraft, validateConfigForBuild } from "../../../packages/core/src/config.js";
 import { rmRetry } from "../../../packages/core/src/paths.js";
 import { FsBrowser } from "./fsBrowser.js";
+import { waveformQuery, openWaveform } from "./waveform.js";
 import { ProjectStore } from "../../../packages/core/src/projectStore.js";
 import { QueryManager } from "../../../packages/core/src/queryManager.js";
 import { SessionManager } from "./session.js";
@@ -308,6 +309,17 @@ async function handle(ctx: HttpContext, req: IncomingMessage, res: ServerRespons
       version: ctx.version,
       roots: ctx.fs.roots.displayRoots,
     });
+    return;
+  }
+  if (pathname === "/api/waveform" && req.method === "POST") {
+    authFor(ctx, req, true);
+    const body = await readJson(req) as Record<string, unknown> | null;
+    if (body?.op === "open") {
+      if (typeof body.projectId !== "string" || typeof body.snapshotId !== "string")
+        throw new AppError("INVALID_INPUT", "请先加载 RTL 索引，再打开波形。");
+      const snapshot = ctx.snapshots.manifest(body.projectId, body.snapshotId);
+      ok(res, await openWaveform(body, ctx.fs.roots, snapshot), 200, 24 * 1024 * 1024);
+    } else ok(res, await waveformQuery(body, ctx.fs.roots), 200, 24 * 1024 * 1024);
     return;
   }
   if (pathname === "/api/paths" && req.method === "GET") {
@@ -637,6 +649,12 @@ async function handleSnapshot(
         scopeByte: qnum(url, "scopeByte"),
         maxBytes: qnum(url, "maxBytes"),
       }), 200, LIMITS.maxSourceResponseBytes);
+      return;
+    case "wave-targets":
+      ok(res, await q("wave.targets", { instanceId: qstr(url, "instanceId"), symbolId: qstr(url, "symbolId") }));
+      return;
+    case "wave-source":
+      ok(res, await q("wave.source", { scope: qstr(url, "scope"), name: qstr(url, "name") }));
       return;
     case "definition":
       ok(res, await q("symbol.definition", { symbolId: qstr(url, "symbolId") }));

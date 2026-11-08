@@ -1,0 +1,26 @@
+OpenLLC 256 KiB generated RTL example
+
+The RTL, file list, analysis wrapper and simulation dump are copied from
+user-supplied openllc-256k-rtl-wave.tar. They retain their upstream rights;
+the RTL Browser Apache-2.0 license does not replace their licenses.
+
+OpenLLC / XSCache and utility source notices include:
+Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+Copyright (c) 2020-2021 Peng Cheng Laboratory
+XiangShan is licensed under Mulan PSL v2.
+THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+See LICENSE for the complete Mulan PSL v2 text.
+
+Rocket Chip / CDE / Chisel contributions retain their respective copyright
+notices and license terms reproduced under licenses/. Those texts include
+applicable Regents of the University of California and SiFive notices.
+
+The supplied design includes generated OpenNCB modules. No independent license
+was found in its pinned upstream revision; see SOURCE.md for the exact scope
+and unresolved attribution. No license for that component is invented here.
+
+Only documentation and license files were added when integrating this example.
+No original Chisel/Scala source, dependency repository, compiler or cache is
+included. Original generated RTL source-location comments remain unchanged.

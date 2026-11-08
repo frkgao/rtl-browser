@@ -68,7 +68,7 @@ export function TracePanel({ trace, loading, error, onJump, onMore }: Props) {
   if (!trace) return <div className="panel-empty">右键信号选择 Driver 或 Load，结果会显示在这里。</div>;
   const direction = trace.direction === "driver" ? "来源" : "目的端";
   return (
-    <div className="trace-panel">
+    <div data-search-scope className="trace-panel">
       <div className="trace-head">
         <span className={`dir-badge dir-${trace.direction}`}>{direction}</span>
         <span className="mono">{trace.traceId}</span>

@@ -33,6 +33,8 @@ export function SearchBox({ value, onChange, onNext, onPrev, index, total, place
       <span className="search-icon" aria-hidden="true">⌕</span>
       <input
         className="search-input"
+        data-search-input
+        title="Ctrl+F 聚焦搜索（macOS 也支持 Cmd+F）"
         value={value}
         disabled={disabled}
         placeholder={placeholder}

@@ -847,6 +847,43 @@ function loadsList(p: Params) {
   };
 }
 
+function waveTargets(p: Params) {
+  const instanceId=mustId(p.instanceId,"instanceId"), symbolId=mustId(p.symbolId,"symbolId");
+  const inst=instanceRow(instanceId);
+  const sym=oneRow("SELECT * FROM symbol WHERE id=?",[symbolId]);
+  if(!inst||!sym||String(sym.body_id)!==String(inst.body_id)) throw new QErr("INVALID_INPUT","信号不属于当前实例");
+  const paths=[`${inst.path}.${sym.name}`];
+  const aliases=aliasSymbolIds(symbolId,idStr(inst.body_id));
+  for(const id of aliases){
+    const links=listRows(`SELECT i.path,s.name FROM load_edge e JOIN instance i ON i.id=e.target_instance_id JOIN symbol s ON s.id=e.target_symbol_id
+      WHERE e.source_symbol_id=? AND e.source_instance_id=? AND e.role='port' AND e.exactness='exact'
+      AND e.source_bit_lo=0 AND e.target_bit_lo=0 AND e.source_bit_hi=? AND e.target_bit_hi=? AND s.width=?
+      UNION SELECT i.path,s.name FROM driver d JOIN instance i ON i.id=d.source_instance_id JOIN symbol s ON s.id=d.source_symbol_id
+      WHERE d.target_symbol_id=? AND d.instance_id=? AND d.kind='port' AND d.exactness='exact'
+      AND d.source_bit_lo=0 AND d.target_bit_lo=0 AND d.source_bit_hi=? AND d.target_bit_hi=? AND s.width=? LIMIT 64`,
+      [id,instanceId,Number(sym.width)-1,Number(sym.width)-1,sym.width,id,instanceId,Number(sym.width)-1,Number(sym.width)-1,sym.width]);
+    for(const link of links)paths.push(`${link.path}.${link.name}`);
+  }
+  return {paths:[...new Set(paths)].slice(0,64)};
+}
+
+function waveSource(p: Params) {
+  if (typeof p.scope !== "string" || typeof p.name !== "string" || p.scope.length > 4096 || p.name.length > 1024)
+    throw new QErr("INVALID_INPUT", "invalid waveform signal path");
+  const rows = listRows(`SELECT i.id AS instance_id,s.id AS symbol_id,s.source_id,s.line,s.start_byte,s.end_byte
+    FROM instance i JOIN symbol s ON s.body_id=i.body_id
+    WHERE i.path=? AND s.name=? AND s.kind IN ('port','net','variable') AND s.source_id IS NOT NULL ORDER BY CASE s.kind WHEN 'port' THEN 0 ELSE 1 END,s.id LIMIT 100`, [p.scope, p.name]);
+  if (!rows.length) throw new QErr("INVALID_INPUT", "波形层次或信号在当前 RTL 中不存在，请检查顶层和实例路径");
+  const first = rows[0];
+  for (const candidate of rows.slice(1)) {
+    const sameDeclaration = candidate.source_id === first.source_id && candidate.start_byte === first.start_byte && candidate.end_byte === first.end_byte;
+    const alias = hasAliasTable() && oneRow("SELECT 1 FROM symbol_alias WHERE (symbol_id=? AND alias_symbol_id=?) OR (symbol_id=? AND alias_symbol_id=?)", [idStr(first.symbol_id), idStr(candidate.symbol_id), idStr(candidate.symbol_id), idStr(first.symbol_id)]);
+    if (!sameDeclaration && !alias) throw new QErr("INVALID_INPUT", "信号映射不唯一");
+  }
+  const r = rows[0];
+  return { instanceId: idStr(r.instance_id), symbolId: idStr(r.symbol_id), sourceId: idStr(r.source_id), line: Number(r.line ?? 1), startByte: numSafe(r.start_byte), endByte: numSafe(r.end_byte) };
+}
+
 function symbolDefinition(p: Params) {
   const symbolId = mustId(p.symbolId, "symbolId");
   const row = oneRow("SELECT name,kind,source_id,start_byte,end_byte,line FROM symbol WHERE id=?", [symbolId]);
@@ -926,6 +963,8 @@ const methods: Record<string, (p: Params) => unknown> = {
   "loads.list": loadsList,
   "inspector.page": inspectorPage,
   "symbol.definition": symbolDefinition,
+  "wave.source": waveSource,
+  "wave.targets": waveTargets,
 };
 
 process.on("message", (msg: { id?: string; method?: string; params?: Params }) => {

@@ -28,6 +28,7 @@ interface Props {
   onRefHover: (ref: SemanticRef | null, event?: React.MouseEvent) => void;
   onRefContext: (ref: SemanticRef, event: React.MouseEvent) => void;
   onRefClick: (ref: SemanticRef) => void;
+  onAddToWave?: (ref: SemanticRef) => void;
   onScrollRatio: (ratio: number) => void;
   restoreScrollRatio?: number | null;
   layoutKey?: string;
@@ -156,11 +157,24 @@ function segmentsFor(
 
 export function SourceViewport(props: Props) {
   const { window: win, highlight, onRefHover, onRefContext, onRefClick } = props;
+  const hoveredRef = useRef<SemanticRef | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [lineHeight, setLineHeight] = useState(20);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewHeight, setViewHeight] = useState(600);
   const restored = useRef(false);
+  useEffect(() => { hoveredRef.current = null; }, [win]);
+
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement)?.closest("input,textarea,select,[contenteditable=true]")) return;
+      if (e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey && e.key.toLowerCase() === "w" && hoveredRef.current) {
+        e.preventDefault(); props.onAddToWave?.(hoveredRef.current);
+      }
+    };
+    document.addEventListener("keydown", key);
+    return () => document.removeEventListener("keydown", key);
+  }, [props.onAddToWave]);
 
   useLayoutEffect(() => {
     const el = scrollRef.current;
@@ -274,8 +288,11 @@ export function SourceViewport(props: Props) {
                   <span
                     key={i}
                     className={`tok-${s.cls} sem sem-${target.status}${s.highlighted ? " sem-hl token-hl" : ""}${target.role === "declaration" ? " sem-decl" : ""}${searchCls}${inactiveCls}`}
-                    onMouseEnter={(e) => onRefHover(target, e)}
-                    onMouseLeave={() => onRefHover(null)}
+                    tabIndex={0}
+                    title="Ctrl+W 添加到波形"
+                    onKeyDown={(e) => { if (e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey && e.key.toLowerCase() === "w") { e.preventDefault(); e.stopPropagation(); props.onAddToWave?.(target); } }}
+                    onMouseEnter={(e) => { hoveredRef.current = target; onRefHover(target, e); }}
+                    onMouseLeave={() => { hoveredRef.current = null; onRefHover(null); }}
                     onClick={(e) => { e.stopPropagation(); onRefClick(target); }}
                     onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onRefContext(target, e); }}
                   >

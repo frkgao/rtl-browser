@@ -12,3 +12,6 @@ work/
 /examples/*
 !/examples/axi-crossbar/
 !/examples/pulp-axi/
+!/examples/openllc-256k-rtl-wave/
+# Keep the generated RTL example; the 450 MiB simulation dump stays local.
+/examples/openllc-256k-rtl-wave/wave/*.fst

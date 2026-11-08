@@ -25,9 +25,12 @@ import { HierarchyTree } from "../../../packages/ui/src/HierarchyTree.js";
 import { InspectorPanel } from "../../../packages/ui/src/InspectorPanel.js";
 import { SourceViewport, type SourceHighlight } from "../../../packages/ui/src/SourceViewport.js";
 import { CompilePanel } from "../../../packages/ui/src/CompilePanel.js";
+import { WaveformPanel, waveName } from "../../../packages/ui/src/WaveformPanel.js";
+import type { WaveSignal } from "../../../packages/contracts/src/waveform.js";
 import { TracePanel } from "../../../packages/ui/src/TracePanel.js";
 import { PathPicker } from "../../../packages/ui/src/PathPicker.js";
 import { SearchBox } from "../../../packages/ui/src/SearchBox.js";
+import { useSearchShortcut } from "../../../packages/ui/src/useSearchShortcut.js";
 
 type ThemeMode = "light" | "dark" | "system";
 type Trace = DriverPage | LoadPage;
@@ -81,6 +84,7 @@ function errorText(e: unknown): string {
 }
 
 export default function App() {
+  useSearchShortcut();
   const [client, setClient] = useState<RtlClient | null>(null);
   const [fatal, setFatal] = useState<string | null>(null);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
@@ -126,7 +130,7 @@ export default function App() {
   const traceRestoreGen = useRef(0);
   const [traceLoading, setTraceLoading] = useState(false);
   const [traceError, setTraceError] = useState<string | null>(null);
-  const [panelTab, setPanelTab] = useState<"trace" | "compile">("compile");
+  const [panelTab, setPanelTab] = useState<"trace" | "compile" | "wave">("compile");
   const [bottomOpen, setBottomOpen] = useState(true);
   const [panelHeight, setPanelHeight] = useState(230);
   const [leftWidth, setLeftWidth] = useState(() => readNum("rtl.leftWidth", 288));
@@ -685,6 +689,10 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, project?.projectId, watchJobId]);
 
+  const selectedBuild=jobs.find(j=>j.jobId===selectedJobId);
+  const diagnosticRevision=selectedBuild
+    ? `${selectedBuild.state}:${selectedBuild.diagnostics.error}:${selectedBuild.diagnostics.warning}:${selectedBuild.diagnostics.note}:${selectedBuild.diagnostics.info}:${selectedBuild.diagnostics.truncated}`
+    : "";
   useEffect(() => {
     if (!client || !project || !selectedJobId || panelTab !== "compile") return;
     let cancelled = false;
@@ -700,7 +708,7 @@ export default function App() {
       .finally(() => { if (!cancelled) setDiagLoading(false); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, project?.projectId, selectedJobId, diagFilterSeverity, diagFilterStage, panelTab]);
+  }, [client, project?.projectId, selectedJobId, diagFilterSeverity, diagFilterStage, panelTab, diagnosticRevision]);
 
   function clearSnapshotView() {
     setSnapshot(null);
@@ -925,6 +933,32 @@ export default function App() {
     setDownDepth(downStack.current.length);
     if (!target) return;
     await navigate(target, false);
+  }
+
+  const [waveAdd, setWaveAdd] = useState<{ path: string; paths?: string[]; seq: number } | null>(null);
+  useEffect(() => { setWaveAdd(null); }, [snapshot?.snapshotId]);
+  async function addRefToWave(ref: SemanticRef) {
+    if (!client || !project || !snapshot || !current) return;
+    try {
+      const symbolId = await resolveRefSymbol(ref);
+      if (!symbolId) throw new Error("请选择已解析的信号");
+      const def = await client.definition(project.projectId, snapshot.snapshotId, symbolId);
+      if (!def.label || !SIGNAL_KINDS.has(def.kind ?? "")) throw new Error("该对象不是波形信号");
+      const scope = ref.targetInstanceId && ref.targetInstanceId !== current.id
+        ? (await client.ancestors(project.projectId, snapshot.snapshotId, ref.targetInstanceId)).at(-1)?.path
+        : current.path;
+      if (!scope) throw new Error("无法确定信号实例");
+      const targets=await client.waveTargets(project.projectId,snapshot.snapshotId,ref.targetInstanceId ?? current.id,symbolId);
+      setWaveAdd(old => ({ path: `${scope}.${def.label}`, paths:targets.paths, seq: (old?.seq ?? 0) + 1 }));
+      setPanelTab("wave"); setBottomOpen(true); setPanelHeight(h=>Math.max(h,380)); setMenu(null);
+    } catch(e) { setError(errorText(e)); }
+  }
+  async function jumpWave(signal: WaveSignal) {
+    if (!client || !project || !snapshot) throw new Error("请先加载 RTL 索引");
+    const target = await client.waveSource(project.projectId, snapshot.snapshotId, signal.scope.join("."), waveName(signal.name));
+    await navigate({ projectId: project.projectId, snapshotId: snapshot.snapshotId,
+      instanceId: target.instanceId, sourceId: target.sourceId, line: target.line,
+      tokenStart: target.startByte, tokenEnd: target.endByte, scrollRatio: null }, true);
   }
 
   async function selectRef(ref: SemanticRef) {
@@ -1447,7 +1481,7 @@ export default function App() {
         ) : (
           <>
             <div className="workspace" style={{ bottom: bottomOpen ? panelHeight + 10 : 44 }}>
-              <aside className="left-pane" style={{ width: leftWidth, flexBasis: leftWidth }}>
+              <aside data-search-scope className="left-pane" style={{ width: leftWidth, flexBasis: leftWidth }}>
                 <div className="pane-title pane-title-search">
                   <span>Hierarchy</span>
                   <SearchBox
@@ -1474,7 +1508,7 @@ export default function App() {
                 />
               </aside>
               <div className="v-resize left-resize" onMouseDown={(e) => startColumnResize("left", e)} title="拖动调整层次窗口宽度" />
-              <section className="source-pane">
+              <section data-search-scope className="source-pane">
                 <div className="source-toolbar">
                   <span className="source-title mono" title={sourceTitle}>{sourceTitle}</span>
                   {sourceWindow && <span className="source-range muted">{sourceWindow.startLine}–{sourceWindow.endLine} / {sourceWindow.totalLines}</span>}
@@ -1501,6 +1535,7 @@ export default function App() {
                     onRefHover={(r, e) => void onRefHover(r, e)}
                     onRefContext={(r, e) => setMenu({ x: e.clientX, y: e.clientY, ref: r })}
                     onRefClick={(r) => void selectRef(r)}
+                    onAddToWave={(r) => void addRefToWave(r)}
                     onScrollRatio={(r) => { scrollRatioRef.current = r; }}
                     restoreScrollRatio={sourceAnchor.ratio}
                     layoutKey={`${globalScale}-${codeScale}`}
@@ -1527,19 +1562,21 @@ export default function App() {
               </aside>
             </div>
   
-            <section className={`bottom-panel${bottomOpen ? "" : " collapsed"}`} style={{ height: bottomOpen ? panelHeight : 38 }}>
+            <section data-search-scope className={`bottom-panel${bottomOpen ? "" : " collapsed"}`} style={{ height: bottomOpen ? panelHeight : 38 }}>
               <div className="panel-resize" onMouseDown={startResize} title="拖动调整高度" />
               <div className="panel-tabs">
                 <button className={panelTab === "trace" ? "active" : ""} onClick={() => { setPanelTab("trace"); setBottomOpen(true); }}>Trace</button>
                 <button className={panelTab === "compile" ? "active" : ""} onClick={() => { setPanelTab("compile"); setBottomOpen(true); }}>Compile</button>
+                <button className={panelTab === "wave" ? "active" : ""} onClick={() => { setPanelTab("wave"); setBottomOpen(true); setPanelHeight(h=>Math.max(h,380)); }}>Waveform</button>
                 <span className="spacer" />
                 <button onClick={() => setBottomOpen((v) => !v)}>{bottomOpen ? "折叠" : "展开"}</button>
               </div>
-              {bottomOpen && (
-                <div className="panel-body">
+              {(
+                <div className="panel-body" style={{ display: bottomOpen ? undefined : "none" }}>
+                  {client && <div style={{ display: panelTab === "wave" ? "contents" : "none" }}><WaveformPanel key={snapshot.snapshotId} client={client} projectId={project!.projectId} snapshotId={snapshot.snapshotId} addRequest={waveAdd} onJump={jumpWave} /></div>}
                   {panelTab === "trace" ? (
                     <TracePanel trace={trace} loading={traceLoading} error={traceError} onJump={(r) => void jumpTrace(r)} onMore={() => void traceMore()} />
-                  ) : compileView}
+                  ) : panelTab === "compile" ? compileView : null}
                 </div>
               )}
             </section>
@@ -1660,6 +1697,7 @@ export default function App() {
         <div className="context-menu" style={{ left: menu.x, top: menu.y }} onMouseLeave={() => undefined}>
           <button onClick={() => void menuAction("driver")} disabled={!current}>Driver — 追来源</button>
           <button onClick={() => void menuAction("load")} disabled={!current}>Load — 追目的端</button>
+          <button onClick={() => void addRefToWave(menu.ref)}>添加到波形 · Ctrl+W</button>
           {menu.ref.targetKind === "symbol" && menu.ref.role !== "declaration" &&
             <button onClick={() => void menuAction("definition")} disabled={!menu.ref.targetId}>转到定义位置</button>}
           <button onClick={() => void menuAction("up")} disabled={!current?.parentId}>Up — 父实例化位置</button>

@@ -246,7 +246,7 @@ void FilelistNormalizer::readFilelist(const std::string& file, std::vector<std::
       continue;
     }
     if (tok.rfind("+define+", 0) == 0) { out.push_back(tok); continue; }
-    if (tok == "-D" || tok == "-G") {
+    if (tok == "-D" || tok == "-G" || tok == "--top") {
       if (i + 1 >= tokens.size()) throw FilelistError(where + ": " + tok + " requires a value");
       out.push_back(tok);
       out.push_back(tokens[++i].text);

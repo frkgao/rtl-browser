@@ -18,6 +18,8 @@ import type {
   SnapshotManifest, SnapshotSummary, SourceWindow, SymbolDefinition,
 } from "../../contracts/src/types.js";
 
+import type { WaveSignals, WaveValues, WaveSource } from "../../contracts/src/waveform.js";
+
 export class ApiError extends Error {
   code: string;
   retryable: boolean;
@@ -71,6 +73,29 @@ export class RtlClient {
 
   getWorkspace(): Promise<{ projectRoot: string | null; project: ProjectSummary | null; config: BuildConfig | null; snapshot: SnapshotSummary | null }> {
     return this.req("GET", "/api/workspace");
+  }
+  waveSignals(path: string, query = "", offset = 0): Promise<WaveSignals> {
+    return this.req("POST", "/api/waveform", { op: "signals", path, query, offset });
+  }
+  openWaveform(path: string, projectId: string, snapshotId: string): Promise<WaveSignals> {
+    return this.req("POST", "/api/waveform", { op: "open", path, projectId, snapshotId });
+  }
+  resolveWaveSignals(path: string, paths: string[]): Promise<WaveSignals> {
+    return this.req("POST", "/api/waveform", { op: "resolve", path, paths });
+  }
+  waveEdge(path: string, handle: number, cursor: string, direction: number, kind: "any"|"rise"|"fall"): Promise<{time:string|null}> {
+    return this.req("POST", "/api/waveform", {op:"edge",path,handle,cursor,direction,kind});
+  }
+  waveTargets(projectId: string, snapshotId: string, instanceId: string, symbolId: string): Promise<{paths:string[]}> {
+    const q=new URLSearchParams({instanceId,symbolId});
+    return this.req("GET", `/api/projects/${encodeURIComponent(projectId)}/snapshots/${encodeURIComponent(snapshotId)}/wave-targets?${q}`);
+  }
+  waveSource(projectId: string, snapshotId: string, scope: string, name: string): Promise<WaveSource> {
+    const q = new URLSearchParams({ scope, name });
+    return this.req("GET", `/api/projects/${encodeURIComponent(projectId)}/snapshots/${encodeURIComponent(snapshotId)}/wave-source?${q}`);
+  }
+  waveValues(path: string, handles: number[], start: string, end: string): Promise<WaveValues> {
+    return this.req("POST", "/api/waveform", { op: "values", path, handles, start, end });
   }
   openWorkspace(path: string): Promise<{ projectRoot: string; project: ProjectSummary | null; config: BuildConfig | null; snapshot: SnapshotSummary | null }> {
     return this.req("POST", "/api/workspace/open", { path });

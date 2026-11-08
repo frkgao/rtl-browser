@@ -13,8 +13,9 @@
     "build": "npm run build:server && npm run build:web",
     "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.web.json --noEmit",
     "check:env": "node tools/dev/check-env.mjs",
-    "test": "node tests/contracts.mjs && node tests/integration.mjs",
-    "serve": "node dist/server/apps/server/src/main.js"
+    "test": "node tests/contracts.mjs && node tests/waveform-layout.mjs && node tests/integration.mjs",
+    "serve": "node dist/server/apps/server/src/main.js",
+    "test:waveform": "node tests/waveform-native.mjs examples/openllc-256k-rtl-wave/wave/llc-256k.fst && node tests/waveform-e2e.mjs"
   },
   "dependencies": {
     "react": "19.3.1",

@@ -76,6 +76,11 @@ $jobs = if ($env:RTL_BUILD_JOBS) { [int]$env:RTL_BUILD_JOBS } else { 4 }
 Invoke-RtlCmake -ProjectRoot $Root -Arguments @('--build', $BuildDir, '--parallel', "$jobs")
 
 Write-Host "== typecheck =="
+Invoke-RtlCmake -ProjectRoot $Root -Arguments @(
+  '-S', (Join-Path $Root 'native\wave-worker'), '-B', (Join-Path $Root 'build\wave-worker'), '-G', 'Ninja',
+  '-DCMAKE_BUILD_TYPE=Release', "-DRTL_DEPS_DIR=$Deps"
+)
+Invoke-RtlCmake -ProjectRoot $Root -Arguments @('--build', (Join-Path $Root 'build\wave-worker'), '--parallel', "$jobs")
 & $Npm run typecheck
 if ($LASTEXITCODE -ne 0) { throw "TypeScript typecheck failed." }
 
