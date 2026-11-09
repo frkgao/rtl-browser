@@ -24,3 +24,8 @@ collected under `licenses/`.
 `npm` dependencies resolved by `package-lock.json` may carry additional
 licenses in their own packages under `node_modules/`; this table covers the
 direct runtime/build dependencies of the vertical slice.
+
+The vendored libfst has local Windows portability fixes: OS-level branches use
+`_WIN32` for both MSVC and MinGW, MSVC I/O names are mapped to the CRT APIs, and
+FastLZ GCC diagnostic pragmas are guarded. The FST round-trip CTest covers all
+three compression modes with and without whole-file repacking.

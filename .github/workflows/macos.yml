@@ -93,6 +93,7 @@ jobs:
         run: |
           # 原生构建 worker、服务端和 WebUI。
           ./tools/macos.sh build
+          .sandbox/deps/tools/bin/ctest --test-dir build/wave-worker --output-on-failure
           # 原生执行包含 UI 的完整测试。
           ./tools/macos.sh test
       # 设置工作流、任务或步骤的显示名称。

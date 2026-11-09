@@ -30,3 +30,10 @@ set_target_properties(wave-worker PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_B
 if(MSVC)
   target_compile_options(wave-worker PRIVATE /utf-8 /EHsc)
 endif()
+
+include(CTest)
+if(BUILD_TESTING)
+  add_executable(wave-portability "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/waveform-portability.cpp")
+  target_link_libraries(wave-portability PRIVATE rtl_fst)
+  add_test(NAME fst-roundtrip COMMAND wave-portability "${CMAKE_CURRENT_BINARY_DIR}/roundtrip-fixtures")
+endif()

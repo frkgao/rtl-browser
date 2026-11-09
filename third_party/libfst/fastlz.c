@@ -25,8 +25,10 @@
 
 #include <stdint.h>
 
+#if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wimplicit-fallthrough"
+#endif
 
 /*
  * Give hints to the compiler for branch prediction optimization.
@@ -508,4 +510,6 @@ int fastlz_compress_level(int level, const void* input, int length, void* output
   return 0;
 }
 
+#if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic pop
+#endif

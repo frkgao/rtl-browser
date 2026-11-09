@@ -46,6 +46,16 @@
 #include "lz4.h"
 #include <errno.h>
 
+/* Keep CRT name mappings private to the C implementation. */
+#ifdef _MSC_VER
+#define dup _dup
+#define close _close
+#define read _read
+#define write _write
+#define getpid _getpid
+#define strdup _strdup
+#endif
+
 #ifndef HAVE_LIBPTHREAD
 #undef FST_WRITER_PARALLEL
 #endif
@@ -54,8 +64,11 @@
 #include <pthread.h>
 #endif
 
-#ifdef __MINGW32__
+/* Local portability fix: use Windows APIs with both MSVC and MinGW. */
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 #endif
 
@@ -109,7 +122,7 @@ void **JenkinsIns(void *base_i, const unsigned char *mem, uint32_t length, uint3
 #include <sys/sysctl.h>
 #endif
 
-#if defined(FST_MACOSX) || defined(__MINGW32__) || defined(__OpenBSD__) || defined(__FreeBSD__) || \
+#if defined(FST_MACOSX) || defined(_WIN32) || defined(__OpenBSD__) || defined(__FreeBSD__) || \
     defined(__NetBSD__)
 #define FST_UNBUFFERED_IO
 #endif
@@ -132,7 +145,7 @@ void **JenkinsIns(void *base_i, const unsigned char *mem, uint32_t length, uint3
 /***                 ***/
 /***********************/
 
-#ifdef __MINGW32__
+#ifdef _WIN32
 #include <io.h>
 #ifndef HAVE_FSEEKO
 #define ftello _ftelli64
@@ -181,7 +194,7 @@ static FILE *unlink_fopen(const char *nam, const char *mode)
 /*
  * system-specific temp file handling
  */
-#ifdef __MINGW32__
+#ifdef _WIN32
 
 static FILE *tmpfile_open(char **nam)
 {
@@ -289,7 +302,7 @@ static char *fstRealpath(const char *path, char *resolved_path)
     return (realpath(path, resolved_path));
 
 #else
-#ifdef __MINGW32__
+#ifdef _WIN32
     if (!resolved_path) {
         resolved_path = (char *)malloc(PATH_MAX + 1);
     }
@@ -305,7 +318,7 @@ static char *fstRealpath(const char *path, char *resolved_path)
 /*
  * mmap compatibility
  */
-#if defined __MINGW32__
+#if defined _WIN32
 #include <limits.h>
 #define fstMmap(__addr, __len, __prot, __flags, __fd, __off) fstMmap2((__len), (__fd), (__off))
 #define fstMunmap(__addr, __len) UnmapViewOfFile((LPCVOID)__addr)
@@ -989,7 +1002,7 @@ static void fstWriterMmapSanity(void *pnt, const char *file, int line, const cha
                 errno,
                 file,
                 line);
-#if !defined(__MINGW32__)
+#if !defined(_WIN32)
         perror("Why");
 #else
         LPSTR mbuf = NULL;
@@ -2044,7 +2057,7 @@ int fstWriterClose2(fstWriterContext *xc)
             gzFile zhandle;
             int zfd;
             int fourpack_duo = 0;
-#ifndef __MINGW32__
+#ifndef _WIN32
             int fnam_len = strlen(xc->filename) + 5 + 1;
             char *fnam = (char *)malloc(fnam_len);
 #endif
@@ -2148,7 +2161,7 @@ int fstWriterClose2(fstWriterContext *xc)
                             SEEK_END); /* move file pointer to end for any section adds */
             fstWriterFflush(xc, xc->handle);
 
-#ifndef __MINGW32__
+#ifndef _WIN32
             snprintf(fnam, fnam_len, "%s.hier", xc->filename);
             unlink(fnam);
             free(fnam);
@@ -2242,7 +2255,7 @@ int fstWriterClose2(fstWriterContext *xc)
             }
         }
 
-#ifdef __MINGW32__
+#ifdef _WIN32
         {
             int flen = strlen(xc->filename);
             char *hf = (char *)calloc(1, flen + 6);
@@ -3822,13 +3835,13 @@ static int fstReaderRecreateHierFile(struct fstReaderContext *xc)
         snprintf(fnam, fnam_len, "%s.hier_%d_%p", xc->filename, getpid(), (void *)xc);
         fstReaderFseeko(xc, xc->f, xc->hier_pos, SEEK_SET);
         uclen = fstReaderUint64(xc->f);
-#ifndef __MINGW32__
+#ifndef _WIN32
         fflush(xc->f);
 #endif
         if (htyp == FST_BL_HIER) {
             fstReaderFseeko(xc, xc->f, xc->hier_pos, SEEK_SET);
             uclen = fstReaderUint64(xc->f);
-#ifndef __MINGW32__
+#ifndef _WIN32
             fflush(xc->f);
 #endif
             zfd = dup(fileno(xc->f));
@@ -3843,12 +3856,12 @@ static int fstReaderRecreateHierFile(struct fstReaderContext *xc)
             fstReaderFseeko(xc, xc->f, xc->hier_pos - 8, SEEK_SET); /* get section len */
             clen = fstReaderUint64(xc->f) - 16;
             uclen = fstReaderUint64(xc->f);
-#ifndef __MINGW32__
+#ifndef _WIN32
             fflush(xc->f);
 #endif
         }
 
-#ifndef __MINGW32__
+#ifndef _WIN32
         xc->fh = fopen(fnam, "w+b");
         if (!xc->fh)
 #endif
@@ -3863,7 +3876,7 @@ static int fstReaderRecreateHierFile(struct fstReaderContext *xc)
             }
         }
 
-#ifndef __MINGW32__
+#ifndef _WIN32
         if (fnam)
             unlink(fnam);
 #endif
@@ -4572,7 +4585,7 @@ int fstReaderInit(struct fstReaderContext *xc)
                 0); /* keeps gzip from acting weird in tandem with fopen */
 #endif
 
-#ifdef __MINGW32__
+#ifdef _WIN32
         xc->filename_unpacked = hf;
 #else
         if (hf) {
@@ -4582,7 +4595,7 @@ int fstReaderInit(struct fstReaderContext *xc)
 #endif
 
         fstReaderFseeko(xc, xc->f, FST_ZWRAPPER_HDR_SIZE, SEEK_SET);
-#ifndef __MINGW32__
+#ifndef _WIN32
         fflush(xc->f);
 #else
         /* Windows UCRT runtime library reads one byte ahead in the file

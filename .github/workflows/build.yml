@@ -76,6 +76,9 @@ jobs:
         shell: pwsh
         run: ./tools/build.ps1
 
+      - name: Test FST portability
+        run: ctest --test-dir build/wave-worker -C Release --output-on-failure
+
       # Bash bootstrap redirects dependency build output to these files.
       - name: Print bootstrap logs on failure
         if: failure() && runner.os != 'Windows'
