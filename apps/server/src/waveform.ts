@@ -1,5 +1,5 @@
 // Copyright 2026 Frank Gao. SPDX-License-Identifier: Apache-2.0
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
@@ -21,6 +21,8 @@ export async function openWaveform(raw: Record<string, unknown>, roots: AllowedR
   return data;
 }
 
+const children = new Set<ChildProcess>();
+export function stopWaveforms(): void { for (const child of children) child.kill("SIGKILL"); }
 let running = 0;
 export async function waveformQuery(raw: unknown, roots: AllowedRoots): Promise<unknown> {
   if (!raw || typeof raw !== "object") throw new AppError("INVALID_INPUT", "invalid waveform request");
@@ -60,6 +62,8 @@ export async function waveformQuery(raw: unknown, roots: AllowedRoots): Promise<
   try {
     return await new Promise((resolve, reject) => {
       const child = spawn(exe, [], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+      children.add(child);
+      child.once("close", () => children.delete(child));
       let output = "", bytes = 0, failure: Error | null = null;
       const timer = setTimeout(() => { failure = new AppError("QUERY_TIMEOUT", "FST read timed out"); child.kill(); }, 30000);
       child.stdout.setEncoding("utf8");

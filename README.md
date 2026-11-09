@@ -28,6 +28,12 @@ RTL Browser 是一个本地运行的 WebUI RTL 浏览器。选择一个工程目
 
 当前只支持 64 位平台。Windows 构建需要较新的 MSVC/Clang：slang 12 要求 MSVC 14.50+/VS 2026 或 Clang 17+，不支持 MinGW。
 
+## macOS 桌面版
+
+桌面版面向 macOS 26 及以上的 Apple Silicon Mac，内置运行依赖，无需浏览器、Node.js 或编译器。通过独立桌面 CI 生成 DMG/ZIP，安装与使用见 [桌面版说明](docs/desktop.md)。当前使用临时签名，尚未经过 Apple 公证，首次打开可能需要在系统设置中允许。
+
+原有 Web/CLI 启动方式保持可用；桌面版的工程配置、索引与波形布局保存在工程的 `.rtlb/desktop` 中，FST 仍需手动打开。
+
 ## 环境要求
 
 第三方库版本和 SHA-256 统一记录在 `tools/deps/versions.json`。首次 bootstrap 需要网络访问 Node.js、SQLite、GitHub 和 npm registry，包括 slang 配置阶段下载的 fmt、Boost 和 tomlplusplus；依赖准备完成后，build 和 serve 可复用本地产物。

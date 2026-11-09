@@ -17,11 +17,12 @@ import { createRoot } from "react-dom/client";
 import App from "./App.js";
 import { WorkspaceLockGate } from "./WorkspaceLockGate.js";
 import "./style.css";
+import { initializeDesktop } from "../../../packages/ui/src/desktop.js";
 
-createRoot(document.getElementById("root")!).render(
+void initializeDesktop().then(() => createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <WorkspaceLockGate>
       <App />
     </WorkspaceLockGate>
   </React.StrictMode>,
-);
+)).catch(() => { document.getElementById("root")!.textContent = "桌面初始化失败，请退出后重试。"; });

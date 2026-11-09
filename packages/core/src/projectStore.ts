@@ -97,7 +97,7 @@ export class ProjectStore {
   private readonly sessionDirs = new Map<string, string>();
   private readonly touchedRoots = new Set<string>();
 
-  constructor(private readonly sessionId: string = crypto.randomUUID()) {
+  constructor(private readonly sessionId: string = crypto.randomUUID(), private readonly persistent = false) {
     if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(sessionId)) {
       throw new AppError("INVALID_INPUT", "invalid session id");
     }
@@ -117,8 +117,8 @@ export class ProjectStore {
       return { projectRoot: root, stateDir: existingDir, project: id ? this.records.get(id) ?? null : null };
     }
     const stateRoot = prepareStateDir(root);
-    pruneStaleSessions(stateRoot, this.sessionId);
-    const sessionDir = prepareSessionDir(stateRoot, this.sessionId, root);
+    if (!this.persistent) pruneStaleSessions(stateRoot, this.sessionId);
+    const sessionDir = this.persistent ? prepareDesktopDir(stateRoot, this.sessionId) : prepareSessionDir(stateRoot, this.sessionId, root);
     this.openDirs.set(root, sessionDir);
     this.sessionDirs.set(root, sessionDir);
     this.touchedRoots.add(root);
@@ -130,8 +130,17 @@ export class ProjectStore {
         if (!parsed || typeof parsed.projectId !== "string" || parsed.projectRoot !== root) {
           throw new Error("invalid session project");
         }
+        if (this.persistent) {
+          if (parsed.formatVersion !== PROJECT_FORMAT_VERSION || !validChildName(parsed.projectId)) throw new Error("unsupported desktop project format");
+          validateBuildConfig(parsed.config);
+          if (parsed.config.projectId !== parsed.projectId || parsed.config.projectRoot !== root) throw new Error("inconsistent desktop project");
+        }
         project = parsed;
       } catch {
+        if (this.persistent) {
+          this.closeRoot(root);
+          throw new AppError("INVALID_INPUT", "桌面工程状态损坏或目录已移动；原始状态已保留，请备份 .rtlb/desktop 后重新创建工程。");
+        }
         // Session-only state is disposable; discard a corrupt session rather
         // than blocking the user with a cross-process reset flow.
         rmSyncRetry(sessionDir, { recursive: true, force: true });
@@ -142,6 +151,7 @@ export class ProjectStore {
       this.records.set(project.projectId, project);
       this.roots.set(root, project.projectId);
       this.cleanupTransient(project.projectId);
+      if (this.persistent) this.recoverInterrupted(project.projectId);
     }
     return { projectRoot: root, stateDir: sessionDir, project };
   }
@@ -152,6 +162,15 @@ export class ProjectStore {
     const id = this.roots.get(root);
     if (id) this.records.delete(id);
     this.roots.delete(root);
+    if (this.persistent) {
+      const dir = this.openDirs.get(root);
+      if (dir) {
+        try {
+          const lock = JSON.parse(fs.readFileSync(path.join(dir, "lock.json"), "utf8"));
+          if (lock.sessionId === this.sessionId) fs.unlinkSync(path.join(dir, "lock.json"));
+        } catch { /* keep an unreadable lock for explicit recovery */ }
+      }
+    }
     this.openDirs.delete(root);
     // Keep the session directory: reopening the same root within this server
     // process resumes this session. It is removed on graceful shutdown.
@@ -169,6 +188,7 @@ export class ProjectStore {
 
   /** Remove only this process's session directories; never touch sibling sessions. */
   purgeSessionState(): void {
+    if (this.persistent) return;
     for (const root of [...this.touchedRoots]) {
       const sessionDir = this.sessionDirs.get(root);
       if (!sessionDir) continue;
@@ -720,4 +740,35 @@ export async function loadProjectConfigForBuild(store: ProjectStore, projectId: 
   const rec = store.get(projectId);
   const config = validateConfigForBuild(rec.config, rec.projectRoot);
   return { rec, config };
+}
+
+/** Desktop state is deliberately separate from disposable Web sessions. */
+function prepareDesktopDir(stateRoot: string, sessionId: string): string {
+  const dir = path.join(stateRoot, "desktop");
+  for (const name of ["", "jobs", "snapshots", "tmp"]) {
+    const child = path.join(dir, name);
+    if (fs.existsSync(child) && fs.lstatSync(child).isSymbolicLink())
+      throw new AppError("PERMISSION_DENIED", "desktop state must not contain directory symlinks");
+    fs.mkdirSync(child, { recursive: true, mode: 0o700 });
+  }
+  const lock = path.join(dir, "lock.json");
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      fs.writeFileSync(lock, JSON.stringify({ sessionId, pid: process.pid, hostname: os.hostname() }), { flag: "wx", mode: 0o600 });
+      return dir;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      let owner: { pid: number; hostname: string };
+      try { owner = JSON.parse(fs.readFileSync(lock, "utf8")); }
+      catch { throw new AppError("TASK_CONFLICT", "桌面工程锁损坏，请确认没有其他实例使用工程后删除 .rtlb/desktop/lock.json。"); }
+      if (owner.hostname !== os.hostname() || !Number.isSafeInteger(owner.pid) || owner.pid < 1)
+        throw new AppError("TASK_CONFLICT", "工程被其他主机占用，或工程锁无效。");
+      try { process.kill(owner.pid, 0); }
+      catch (e) {
+        if ((e as NodeJS.ErrnoException).code === "ESRCH") { fs.unlinkSync(lock); continue; }
+      }
+      throw new AppError("TASK_CONFLICT", "另一个桌面实例正在使用此工程。");
+    }
+  }
+  throw new AppError("TASK_CONFLICT", "无法获取桌面工程锁。");
 }

@@ -1,4 +1,5 @@
 // Copyright 2026 Frank Gao. SPDX-License-Identifier: Apache-2.0
+import { layoutStorage } from "./desktop.js";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { RtlClient } from "../../client/src/api.js";
 import type { WaveSignal, WaveSignals, WaveValues } from "../../contracts/src/waveform.js";
@@ -77,7 +78,7 @@ export function WaveformPanel({ client, projectId, snapshotId, addRequest, onJum
       const a = BigInt(data.start), b = BigInt(data.end);
       setStart(a); setEnd(b > a + 100n ? a + 100n : b); setCursor(a+(b>a+100n?100n:b-a)/2n); setAltCursor(a+(b>a+100n?100n:b-a)/2n);
       try {
-        const saved=localStorage.getItem(layoutKey(p));
+        const saved=await layoutStorage.getItem(layoutKey(p));
         if(saved) await restoreLayout(JSON.parse(saved),p,data,gen);
       } catch(e) { if(gen===generation.current) setError(`波形已打开，但保存的布局未恢复：${message(e)}`); }
     } catch (e) { if (gen === generation.current) setError(message(e)); }
@@ -164,11 +165,11 @@ export function WaveformPanel({ client, projectId, snapshotId, addRequest, onJum
   function layout(): WaveLayout {
     return {version:1,waveform:waveIdentity(info!),rows,start:String(start),end:String(end),cursor:String(cursor),altCursor:altCursor===null?null:String(altCursor),snap,fixedMarkers};
   }
-  function save(download=false) {
+  async function save(download=false) {
     if(!file || !info) return;
     try {
       const text=JSON.stringify(layout(),null,2);
-      localStorage.setItem(layoutKey(file),text);
+      await layoutStorage.setItem(layoutKey(file),text);
       if(download) {
         const url=URL.createObjectURL(new Blob([text],{type:"application/json"}));
         const a=document.createElement("a");a.href=url;a.download="waveform-layout.json";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
@@ -294,7 +295,7 @@ export function WaveformPanel({ client, projectId, snapshotId, addRequest, onJum
       <label>移入组 <select aria-label="移入分组" value="" disabled={!selection.length} onChange={e=>move(selection,e.target.value==="root"?null:e.target.value)}><option value="" disabled>选择…</option><option value="root">根目录</option>{flat.filter(r=>r.kind==="group").map(r=><option key={r.id} value={r.id}>{r.kind==="group"?r.name:""}</option>)}</select></label>
       <span className="wave-palette" aria-label="波形颜色">{Array.from({length:8},(_,i)=><button key={i} aria-label={`颜色 ${i+1}`} title={`颜色 ${i+1}（快捷键 ${i+1}）`} disabled={!selection.length} style={{background:`var(--wave-${i})`}} onClick={()=>applyColor(i)} />)}</span>
       <button disabled={layoutBusy} onClick={()=>save()}>保存布局</button><button disabled={layoutBusy} onClick={()=>save(true)}>导出布局</button>
-      <button disabled={layoutBusy} onClick={()=>{try{const saved=localStorage.getItem(layoutKey(file));if(!saved)throw new Error("没有已保存的布局");void restoreLayout(JSON.parse(saved)).catch(e=>setError(message(e)));}catch(e){setError(message(e));}}}>恢复布局</button>
+      <button disabled={layoutBusy} onClick={async ()=>{try{const saved=await layoutStorage.getItem(layoutKey(file));if(!saved)throw new Error("没有已保存的布局");void restoreLayout(JSON.parse(saved)).catch(e=>setError(message(e)));}catch(e){setError(message(e));}}}>恢复布局</button>
       <button disabled={layoutBusy} onClick={()=>importRef.current?.click()}>导入布局</button>
       <input ref={importRef} type="file" accept=".json" hidden aria-label="导入波形布局文件" onChange={e=>{const f=e.target.files?.[0];if(f)void importLayout(f);e.target.value="";}} />
       <label><input type="checkbox" checked={snap} onChange={e=>setSnap(e.target.checked)} />边沿吸附</label>

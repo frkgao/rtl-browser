@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import { preferenceStorage } from "../../../packages/ui/src/desktop.js";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   BuildConfig, BuildDiagnostic, BuildJobSummary, DriverPage, DriverRecord, HoverInfo,
@@ -65,13 +66,13 @@ const SIGNAL_KINDS = new Set(["port", "net", "variable", "field"]);
 const HIERARCHY_COPY_KINDS = new Set(["port", "net", "variable", "parameter", "localparam"]);
 
 function readNum(key: string, fallback: number): number {
-  const raw = localStorage.getItem(key);
+  const raw = preferenceStorage.getItem(key);
   if (raw === null || raw === "") return fallback;
   const v = Number(raw);
   return Number.isFinite(v) && v > 0 ? v : fallback;
 }
 function readTheme(): ThemeMode {
-  const v = localStorage.getItem("rtl.theme");
+  const v = preferenceStorage.getItem("rtl.theme");
   return v === "light" || v === "dark" || v === "system" ? v : "system";
 }
 function isEditing(el: EventTarget | null): boolean {
@@ -156,7 +157,7 @@ export default function App() {
   const importInputRef = useRef<HTMLInputElement>(null);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [theme, setTheme] = useState<ThemeMode>(readTheme);
-  const [highContrast, setHighContrast] = useState(localStorage.getItem("rtl.highContrast") === "1");
+  const [highContrast, setHighContrast] = useState(preferenceStorage.getItem("rtl.highContrast") === "1");
   const [globalScale, setGlobalScale] = useState(readNum("rtl.globalScale", 1));
   const [codeScale, setCodeScale] = useState(readNum("rtl.codeScale", 1));
 
@@ -185,6 +186,7 @@ export default function App() {
     (async () => {
       const ws = await client.getWorkspace();
       if (cancelled) return;
+      if (ws.projectRoot) await window.rtlDesktop?.recentProject(ws.projectRoot);
       setWorkspaceRoot(ws.projectRoot);
       setOpenPath(ws.projectRoot ?? "");
       setProjects(ws.project ? [ws.project] : []);
@@ -212,10 +214,10 @@ export default function App() {
       root.style.setProperty("--code-scale", String(codeScale));
     };
     apply();
-    localStorage.setItem("rtl.theme", theme);
-    localStorage.setItem("rtl.highContrast", highContrast ? "1" : "0");
-    localStorage.setItem("rtl.globalScale", String(globalScale));
-    localStorage.setItem("rtl.codeScale", String(codeScale));
+    preferenceStorage.setItem("rtl.theme", theme);
+    preferenceStorage.setItem("rtl.highContrast", highContrast ? "1" : "0");
+    preferenceStorage.setItem("rtl.globalScale", String(globalScale));
+    preferenceStorage.setItem("rtl.codeScale", String(codeScale));
     if (theme !== "system") return;
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     mq.addEventListener("change", apply);
@@ -774,12 +776,17 @@ export default function App() {
     } catch (e) { setError(errorText(e)); }
   }
 
+  useEffect(() => {
+    if (client) return window.rtlDesktop?.onOpenProject(root => { void openDirectory(root); });
+  }, [client]);
+
   async function openDirectory(raw: string) {
     if (!client || !raw.trim()) return;
     setOpening(true);
     setError(null);
     try {
       const ws = await client.openWorkspace(raw.trim());
+      if (ws.projectRoot) await window.rtlDesktop?.recentProject(ws.projectRoot);
       setWorkspaceRoot(ws.projectRoot);
       setOpenPath(ws.projectRoot);
       setHomeOpen(false);
@@ -1301,8 +1308,8 @@ export default function App() {
   }
 
   useEffect(() => {
-    localStorage.setItem("rtl.leftWidth", String(Math.round(leftWidth)));
-    localStorage.setItem("rtl.rightWidth", String(Math.round(rightWidth)));
+    preferenceStorage.setItem("rtl.leftWidth", String(Math.round(leftWidth)));
+    preferenceStorage.setItem("rtl.rightWidth", String(Math.round(rightWidth)));
   }, [leftWidth, rightWidth]);
 
   function startColumnResize(side: "left" | "right", e: React.MouseEvent) {
@@ -1425,7 +1432,7 @@ export default function App() {
           <main className="home">
             <section className="home-card">
               <h1>打开工程目录</h1>
-              <p className="muted">选择一个包含 RTL 的目录作为工程根。每次启动都从空白构建表单开始；本次会话状态只写入 <span className="mono">.rtlb/sessions/&lt;id&gt;</span>，正常退出即删除。无写权限时不会打开。运行时不使用 AI，不修改源文件。</p>
+              <p className="muted">{window.rtlDesktop ? "选择一个可写的 RTL 工程目录。配置、已完成的索引和保存的波形布局会在下次打开时恢复，不修改源文件。" : <>选择一个包含 RTL 的目录作为工程根。每次启动都从空白构建表单开始；本次会话状态只写入 <span className="mono">.rtlb/sessions/&lt;id&gt;</span>，正常退出即删除。无写权限时不会打开。运行时不使用 AI，不修改源文件。</>}</p>
               {!client ? <div className="panel-empty">正在连接后端…</div> : (
                 <>
                   <div className="form-grid">
@@ -1434,7 +1441,7 @@ export default function App() {
                         <input value={openPath} onChange={(e) => setOpenPath(e.target.value)} placeholder="输入绝对路径，或点击浏览…" />
                         <button onClick={() => setOpenPicker(true)}>浏览…</button>
                       </span>
-                      <span className="field-help">主界面一次只打开一个工程；每个服务进程使用独立的会话目录，同一目录可启动多个服务进程编译不同设计。页面刷新会恢复本会话状态，服务重启后不恢复旧配置或快照。</span>
+                      <span className="field-help">{window.rtlDesktop ? "一次打开一个工程。也可从“文件 → 最近工程”重新打开；波形需要手动选择。" : <>主界面一次只打开一个工程；每个服务进程使用独立的会话目录，同一目录可启动多个服务进程编译不同设计。页面刷新会恢复本会话状态，服务重启后不恢复旧配置或快照。</>}</span>
                     </label>
                     <div className="form-actions">
                       <button className="primary" disabled={opening || !openPath.trim()} onClick={() => void openDirectory(openPath)}>{opening ? "打开中…" : "打开工程"}</button>

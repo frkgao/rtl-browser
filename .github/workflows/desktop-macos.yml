@@ -1,0 +1,60 @@
+name: Desktop macOS ARM64
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths-ignore: ['docs/**', 'README.md']
+  push:
+    branches: [main]
+    paths-ignore: ['docs/**', 'README.md']
+permissions:
+  contents: read
+concurrency:
+  group: desktop-macos-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  desktop:
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      RTL_BUILD_JOBS: '2'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Download project-private dependencies
+        shell: bash
+        run: |
+          test "$(uname -m)" = arm64
+          ./tools/sandbox/rtl-macos --profile bootstrap --network online -- bash tools/deps/bootstrap-macos-tools.sh
+          ./tools/sandbox/rtl-macos --profile bootstrap --network online -- bash tools/deps/bootstrap.sh
+          ./tools/sandbox/rtl-macos --profile bootstrap --network online -- bash -c 'electron_config_cache="$PWD/.sandbox/cache/electron" node node_modules/electron/install.js'
+      - name: Build and test offline in project sandbox
+        shell: bash
+        run: |
+          ./tools/sandbox/rtl-macos --profile build --network offline -- npm run desktop:packaging-deps
+          ./tools/sandbox/rtl-macos --profile build --network offline -- bash tools/build.sh
+          ./tools/sandbox/rtl-macos --profile build --network offline -- npm test
+          ./tools/sandbox/rtl-macos --profile build --network offline -- npm run test:desktop
+          ./tools/sandbox/rtl-macos --profile build --network offline -- npm run desktop:build
+          ./tools/sandbox/rtl-macos --profile build --network offline -- bash -c 'RTL_DESKTOP_RUNTIME="$PWD/dist/desktop/runtime" npm run test:desktop'
+      - name: Package, install and test offline on isolated runner
+        shell: bash
+        run: |
+          NODE_VERSION="$(sed -n 's/.*"nodeVersion": "\([^"]*\)".*/\1/p' tools/deps/versions.json)"
+          export PATH="$PWD/.sandbox/deps/node-v$NODE_VERSION-darwin-arm64/bin:$PWD/.sandbox/deps/tools/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+          export HOME="$PWD/.sandbox/home" TMPDIR="$PWD/.sandbox/tmp"
+          export XDG_CACHE_HOME="$PWD/.sandbox/cache" NPM_CONFIG_CACHE="$PWD/.sandbox/cache/npm"
+          bash tools/desktop/ci-offline.sh npm run desktop:make
+          bash tools/desktop/ci-offline.sh bash tools/desktop/ci-accept.sh
+      - name: Upload reviewed distribution files
+        uses: actions/upload-artifact@v4
+        with:
+          name: RTL-Browser-macOS-arm64
+          path: |
+            dist/desktop/artifacts/*.dmg
+            dist/desktop/artifacts/*.zip
+            dist/desktop/artifacts/SHA256SUMS
+            dist/desktop/artifacts/validation.json
+          if-no-files-found: error
+          retention-days: 14

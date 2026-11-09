@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import type { FsEntry } from "../../contracts/src/types.js";
 import type { RtlClient } from "../../client/src/api.js";
 
@@ -40,7 +40,17 @@ export function PathPicker({ client, mode, onPick, onClose }: Props) {
       setError(e instanceof Error ? e.message : String(e));
     }
   }
-  useEffect(() => { void load(null); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const nativeRequest = useRef<Promise<string | null> | null>(null);
+  useEffect(() => {
+    if (!window.rtlDesktop) { void load(null); return; }
+    let active = true;
+    nativeRequest.current ??= window.rtlDesktop.pick(mode);
+    void nativeRequest.current.then(selected => {
+      if (!active) return;
+      if (selected) onPick(selected); else onClose();
+    }).catch(e => { if (active) setError(e instanceof Error ? e.message : String(e)); });
+    return () => { active = false; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>

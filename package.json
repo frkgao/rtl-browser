@@ -15,18 +15,36 @@
     "check:env": "node tools/dev/check-env.mjs",
     "test": "node tests/contracts.mjs && node tests/waveform-layout.mjs && node tests/integration.mjs",
     "serve": "node dist/server/apps/server/src/main.js",
-    "test:waveform": "node tests/waveform-native.mjs examples/openllc-256k-rtl-wave/wave/llc-256k.fst && node tests/waveform-e2e.mjs"
+    "test:waveform": "node tests/waveform-native.mjs examples/openllc-256k-rtl-wave/wave/llc-256k.fst && node tests/waveform-e2e.mjs",
+    "desktop:build": "bash tools/desktop/build.sh",
+    "desktop:stage": "node tools/desktop/stage.mjs",
+    "desktop:package": "node tools/desktop/forge.mjs package",
+    "desktop:make": "node tools/desktop/forge.mjs make",
+    "test:desktop": "node tests/desktop-state.mjs",
+    "test:desktop:gui": "node tests/desktop-gui.mjs",
+    "desktop:packaging-deps": "bash tools/desktop/packaging-deps.sh"
   },
   "dependencies": {
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },
   "devDependencies": {
+    "@electron-forge/cli": "8.0.1",
+    "@electron-forge/maker-dmg": "8.0.1",
+    "@electron-forge/maker-zip": "8.0.1",
     "@types/node": "24.19.2",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "electron": "45.2.3",
     "playwright-core": "1.64.1",
     "typescript": "5.9.3",
     "vite": "8.3.5"
+  },
+  "main": "apps/desktop/main.cjs",
+  "productName": "RTL Browser",
+  "description": "Local RTL source and FST waveform browser",
+  "author": "RTL Browser Contributors",
+  "config": {
+    "forge": "./forge.config.cjs"
   }
 }

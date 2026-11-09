@@ -26,6 +26,8 @@ import { SnapshotStore } from "../../../packages/core/src/snapshotStore.js";
 import { FsBrowser } from "./fsBrowser.js";
 import { createHttpServer, type HttpContext } from "./httpServer.js";
 import { SessionManager } from "./session.js";
+import { stopWaveforms } from "./waveform.js";
+import { atomicWriteJson } from "../../../packages/core/src/paths.js";
 import { AppError } from "../../../packages/contracts/src/errors.js";
 
 interface Args {
@@ -97,7 +99,8 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const roots = new AllowedRoots(args.workspace);
   const sessionId = crypto.randomUUID();
-  const projects = new ProjectStore(sessionId);
+  const desktop = process.env.RTL_DESKTOP === "1" && !!process.send;
+  const projects = new ProjectStore(sessionId, desktop);
   const snapshots = new SnapshotStore(projects);
   const builds = new BuildManager(projects, snapshots, args.worker, args.schema);
   const queries = new QueryManager(snapshots);
@@ -123,17 +126,20 @@ async function main(): Promise<void> {
   if (!address || typeof address === "string") throw new AppError("INTERNAL_ERROR", "cannot determine server port");
   session = new SessionManager(address.port);
   const url = `http://127.0.0.1:${address.port}/?token=${encodeURIComponent(session.bootstrapToken)}`;
-  console.log("RTL Browser");
-  console.log(`workspace: ${roots.displayRoots.join(", ")}`);
-  console.log(`worker: ${args.worker}`);
-  console.log(`open: ${url}`);
-  console.log("This URL contains a bootstrap token; the browser removes it after setting the session cookie.");
-
+  if (!desktop) {
+    console.log("RTL Browser");
+    console.log(`workspace: ${roots.displayRoots.join(", ")}`);
+    console.log(`worker: ${args.worker}`);
+    console.log(`open: ${url}`);
+    console.log("This URL contains a bootstrap token; the browser removes it after setting the session cookie.");
+  }
+  if (desktop) process.send?.({ type: "ready", url });
   let shuttingDown = false;
   const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log("shutting down...");
+    stopWaveforms();
     await builds.shutdown();
     await queries.stopAll();
     projects.purgeSessionState();
@@ -142,6 +148,39 @@ async function main(): Promise<void> {
     setTimeout(() => process.exit(0), 3000).unref();
   };
   requestExit = () => { void shutdown(); };
+  if (desktop) {
+    process.on("disconnect", () => { void shutdown(); });
+    process.on("message", (message: unknown) => {
+      void (async () => {
+        if (!message || typeof message !== "object") return;
+        const m = message as { id?: string; type?: string; path?: string; key?: string; value?: string };
+        if (m.type === "shutdown") { await shutdown(); return; }
+        try {
+          let value: unknown = null;
+          if (m.type === "grant" && typeof m.path === "string") {
+            const selected = fs.realpathSync(m.path);
+            if (fs.statSync(selected).isDirectory()) roots.addRoot(selected); else roots.addFile(selected);
+          } else if (m.type === "layout-get" || m.type === "layout-set") {
+            if (!ctx.workspace.projectRoot || typeof m.key !== "string" || !m.key.startsWith("rtl.wave.layout.v1:")) throw new Error("请先打开工程");
+            const opened = await projects.openRoot(ctx.workspace.projectRoot);
+            const name = crypto.createHash("sha256").update(m.key).digest("hex") + ".json";
+            const dir = path.join(opened.stateDir, "layouts");
+            if (fs.existsSync(dir) && fs.lstatSync(dir).isSymbolicLink()) throw new Error("invalid layouts directory");
+            fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+            const file = path.join(dir, name);
+            if (m.type === "layout-set") {
+              if (typeof m.value !== "string" || m.value.length > 2_000_000) throw new Error("layout too large");
+              await atomicWriteJson(file, { key: m.key, value: m.value });
+            } else if (fs.existsSync(file)) {
+              const saved = JSON.parse(fs.readFileSync(file, "utf8"));
+              if (saved.key === m.key) value = saved.value;
+            }
+          } else throw new Error("unknown desktop request");
+          process.send?.({ id: m.id, value });
+        } catch (e) { process.send?.({ id: m.id, error: e instanceof Error ? e.message : String(e) }); }
+      })();
+    });
+  }
   process.on("SIGINT", () => { void shutdown(); });
   process.on("SIGTERM", () => { void shutdown(); });
   if (process.platform === "win32") process.on("SIGBREAK", () => { void shutdown(); });

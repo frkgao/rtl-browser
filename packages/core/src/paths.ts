@@ -85,6 +85,7 @@ export class AllowedRoots {
   readonly displayRoots: string[];
   /** Canonical roots sorted longest-first for containment checks. */
   readonly roots: string[];
+  private readonly files = new Set<string>();
 
   constructor(roots: string[]) {
     const seen = new Set<string>();
@@ -113,10 +114,18 @@ export class AllowedRoots {
     this.roots.sort((a, b) => b.length - a.length);
   }
 
+  /** Native desktop pickers grant only the selected file, not its parent folder. */
+  addFile(file: string): void {
+    const real = canonicalExisting(file, "selected file");
+    if (!fs.statSync(real).isFile()) throw new AppError("INVALID_INPUT", "selected path is not a file");
+    this.files.add(pathKey(real));
+  }
+
   /** Resolve an existing file/directory and enforce the allowlist. */
   resolve(p: string, label = "path"): string {
     if (typeof p !== "string" || p.length === 0) throw new AppError("INVALID_INPUT", `${label} is empty`);
     const real = canonicalExisting(p, label);
+    if (this.files.has(pathKey(real))) return real;
     for (const root of this.roots) {
       if (isWithin(root, real)) return real;
     }
